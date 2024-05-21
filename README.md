@@ -1,3 +1,9 @@
+## Ideas:
+
+- Try Adam
+- Increase bs
+
+
 ## Download data
 
 ### Train

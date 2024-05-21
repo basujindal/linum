@@ -93,17 +93,14 @@ class ImageMaskDataset(Dataset):
         if self.transform:
             image = self.transform(image)
             src = self.transform(src)
-            mask = self.maskTransform(mask)
+            mask = torch.tensor(mask).unsqueeze(0).float()
         
         return image, src,mask
 
 # Define the transforms
 transform = transforms.Compose([
     transforms.ToTensor(),  # Convert PIL Image to tensor
-    transforms.Normalize((0.5,), (0.5,))  # Normalize the image to [-1,1]
-])
-maskTransform = transforms.Compose([
-    transforms.ToTensor(),  # Convert PIL Image to tensor
+    transforms.Normalize((0.5,0.5,0.5), (0.5,0.5,0.5))  # Normalize the image to [-1,1]
 ])
 
 # %%
@@ -155,7 +152,7 @@ class Decoder(nn.Module):
     def __init__(self, in_c, out_c, img_sizes, padding=1):
         super().__init__()
 
-        self.upsample = nn.Upsample(size=img_sizes, mode="bilinear")
+        self.upsample = nn.Upsample(size=img_sizes)
 
 
         self.conv1 = nn.Conv2d(in_c,in_c,3,1, padding)
@@ -243,9 +240,31 @@ image_dir = '/root/data/linum/train/corrupted_imgs/'
 mask_dir = '/root/data/linum/train/binary_masks/'
 src_dir = '/root/data/linum/train/src_imgs/'
 nparams = count_parameters(unet, print_table=False)
-dataset = ImageMaskDataset(image_dir=image_dir, mask_dir=mask_dir, src_dir = src_dir,transform=transform, maskTransform = maskTransform)
+dataset = ImageMaskDataset(image_dir=image_dir, mask_dir=mask_dir, src_dir = src_dir,transform=transform, maskTransform = None)
 dataloader = DataLoader(dataset, batch_size=bs, shuffle=True, num_workers=24)
 
+
+# %%
+# for images, src, masks in tqdm(dataloader):
+#     break
+# torch.max(masks), torch.min(masks)
+
+# %%
+# import os
+# dir = "/root/data/linum/train/binary_masks"
+# paths = os.listdir(dir)
+
+# for path in paths:
+#     img = np.load(os.path.join(dir,path))
+#     break
+# print(np.max(img), np.min(img))
+# ten = torch.tensor(img/255.0)
+# torch.max(ten), torch.min(ten)
+
+# %%
+# print(torch.min(src[0][1]), torch.max(src[0][1]))
+# print(torch.min(src[0][0]), torch.max(src[0][0]))
+# print(torch.min(masks), torch.max(masks))
 
 # %%
 log = False
@@ -263,7 +282,7 @@ if log:
 
 # %%
 # convert_img_tensor_to_pil_img((masks.bool()*images)[0])
-# convert_img_tensor_to_pil_img((images)[0])
+# convert_img_tensor_to_pil_img((img_pred)[8])
 # # convert_mask_tensor_to_pil_img(masks[0])
 # unet = torch.compile(unet)
 
@@ -273,7 +292,6 @@ for epoch in range(epochs):
     for images, src, masks in tqdm(dataloader):
 
         unet.train()
-        
        
         images = images.to(device)
         masks = masks.to(device)
@@ -284,7 +302,9 @@ for epoch in range(epochs):
         iter+=1
         img_pred, mask_pred = unet(images)
 
-        img_loss = 2*torch.sum(torch.abs(masks.bool()*(img_pred-src)))/m
+        img_loss = 2*torch.sum(torch.abs((masks.bool() == 1)*img_pred-(masks.bool() == 1)*src))/m
+        # img_loss = 2*torch.mean(torch.abs((img_pred-src)))
+
         mask_loss = bce(mask_pred, masks)
         loss = mask_loss + img_loss
 
@@ -313,13 +333,7 @@ for epoch in range(epochs):
             mask_losses = 0
             img_losses = 0
 
-# %%
-
-
-# %%
-
-
-# %%
-
+    print("Saving")
+    torch.save(unet.state_dict(), "unet_" + str(epoch) + ".pth")
 
 
