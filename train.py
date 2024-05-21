@@ -115,12 +115,11 @@ class ResnetBlock(nn.Module):
         self.conv2 = nn.Conv2d(out_c,out_c,3,1,padding)
         self.conv3 = nn.Conv2d(out_c,out_c,3,1,padding)
         self.norm = nn.BatchNorm2d(out_c)
-        self.relu = nn.ReLU()
         self.silu = nn.SiLU()
 
     def forward(self, x):
 
-        x = self.conv3(self.relu(self.conv2(self.relu(self.conv1(x)))))
+        x = self.conv3(self.conv2(self.conv1(x)))
         x = self.norm(x) + x
         x = self.silu(x)
 
@@ -135,7 +134,6 @@ class Encoder(nn.Module):
         self.conv1 = nn.Conv2d(in_c,out_c,3,1,padding)
         self.conv2 = nn.Conv2d(out_c,out_c,3,1,padding)
         self.conv3 = nn.Conv2d(out_c,out_c,3,1,padding)
-        self.relu = nn.ReLU()
 
         self.resBlocks = nn.ModuleList([ResnetBlock(out_c, padding) for i in range(3)])
 
@@ -144,7 +142,7 @@ class Encoder(nn.Module):
 
     def forward(self, x):
 
-        x = self.conv3(self.relu(self.conv2(self.relu(self.conv1(x)))))
+        x = self.conv3(self.conv2(self.conv1(x)))
         x = self.silu(x)
 
         for block in self.resBlocks:
@@ -163,7 +161,6 @@ class Decoder(nn.Module):
         self.conv1 = nn.Conv2d(in_c,in_c,3,1, padding)
         self.conv2 = nn.Conv2d(in_c,in_c,3,1, padding)
         self.conv3 = nn.Conv2d(in_c,in_c//2,3,1, padding)
-        self.relu = nn.ReLU()
 
 
         self.conv4 = nn.Conv2d(in_c,out_c,3,1, padding)
@@ -178,9 +175,9 @@ class Decoder(nn.Module):
     def forward(self, x, skip):
 
         x = self.upsample(x)
-        x = self.conv3(self.relu(self.conv2(self.relu(self.conv1(x)))))
+        x = self.conv3(self.conv2(self.conv1(x)))
         x = torch.cat((x, skip), dim = 1)
-        x = self.conv6(self.relu(self.conv5(self.relu(self.conv4(x)))))
+        x = self.conv6(self.conv5(self.conv4(x)))
         x = self.silu(x)
 
         for block in self.resBlocks:
@@ -230,7 +227,7 @@ class Unet(nn.Module):
         return image, mask
 
 # %%
-lr = 1e-5
+lr = 1e-4
 # bce = nn.BCEWithLogitsLoss()
 bce = nn.BCELoss()
 bs = 48
@@ -251,6 +248,7 @@ dataloader = DataLoader(dataset, batch_size=bs, shuffle=True, num_workers=24)
 
 
 # %%
+log = False
 log = True
 log_iter = 20
 img_losses = 0
@@ -311,7 +309,7 @@ for epoch in range(epochs):
                     'Predicted Masks' : [wandb.Image(i) for i in (mask_pred[:num_imgs]).detach()],
                     })
 
-            # print(epoch, iter, (mask_losses+img_losses)/log_iter, mask_losses/log_iter,img_losses/log_iter)
+            print(epoch, iter, (mask_losses+img_losses)/log_iter, mask_losses/log_iter,img_losses/log_iter)
             mask_losses = 0
             img_losses = 0
 
