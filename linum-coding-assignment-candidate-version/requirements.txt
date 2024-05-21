@@ -1,0 +1,8 @@
+torch
+torchudio
+torchvision
+pydantic-settings
+pydantic
+tqdm
+numpy
+pillow
