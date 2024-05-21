@@ -1,4 +1,4 @@
-
+# %%
 from contextlib import nullcontext
 import os
 import torch
@@ -100,13 +100,13 @@ class ImageMaskDataset(Dataset):
 # Define the transforms
 transform = transforms.Compose([
     transforms.ToTensor(),  # Convert PIL Image to tensor
-    transforms.Normalize((0.5,), (0.5,))  # Normalize the image to [0, 1]
+    transforms.Normalize((0.5,), (0.5,))  # Normalize the image to [-1,1]
 ])
 maskTransform = transforms.Compose([
     transforms.ToTensor(),  # Convert PIL Image to tensor
 ])
 
-
+# %%
 class ResnetBlock(nn.Module):
     def __init__(self, out_c,padding=1):
         super().__init__()
@@ -115,11 +115,12 @@ class ResnetBlock(nn.Module):
         self.conv2 = nn.Conv2d(out_c,out_c,3,1,padding)
         self.conv3 = nn.Conv2d(out_c,out_c,3,1,padding)
         self.norm = nn.BatchNorm2d(out_c)
+        self.relu = nn.ReLU()
         self.silu = nn.SiLU()
 
     def forward(self, x):
 
-        x = self.conv3(self.conv2(self.conv1(x)))
+        x = self.conv3(self.relu(self.conv2(self.relu(self.conv1(x)))))
         x = self.norm(x) + x
         x = self.silu(x)
 
@@ -134,6 +135,7 @@ class Encoder(nn.Module):
         self.conv1 = nn.Conv2d(in_c,out_c,3,1,padding)
         self.conv2 = nn.Conv2d(out_c,out_c,3,1,padding)
         self.conv3 = nn.Conv2d(out_c,out_c,3,1,padding)
+        self.relu = nn.ReLU()
 
         self.resBlocks = nn.ModuleList([ResnetBlock(out_c, padding) for i in range(3)])
 
@@ -142,7 +144,7 @@ class Encoder(nn.Module):
 
     def forward(self, x):
 
-        x = self.conv3(self.conv2(self.conv1(x)))
+        x = self.conv3(self.relu(self.conv2(self.relu(self.conv1(x)))))
         x = self.silu(x)
 
         for block in self.resBlocks:
@@ -155,12 +157,13 @@ class Decoder(nn.Module):
     def __init__(self, in_c, out_c, img_sizes, padding=1):
         super().__init__()
 
-        self.upsample = nn.Upsample(size=img_sizes)
+        self.upsample = nn.Upsample(size=img_sizes, mode="bilinear")
 
 
         self.conv1 = nn.Conv2d(in_c,in_c,3,1, padding)
         self.conv2 = nn.Conv2d(in_c,in_c,3,1, padding)
         self.conv3 = nn.Conv2d(in_c,in_c//2,3,1, padding)
+        self.relu = nn.ReLU()
 
 
         self.conv4 = nn.Conv2d(in_c,out_c,3,1, padding)
@@ -175,9 +178,9 @@ class Decoder(nn.Module):
     def forward(self, x, skip):
 
         x = self.upsample(x)
-        x = self.conv3(self.conv2(self.conv1(x)))
+        x = self.conv3(self.relu(self.conv2(self.relu(self.conv1(x)))))
         x = torch.cat((x, skip), dim = 1)
-        x = self.conv6(self.conv5(self.conv4(x)))
+        x = self.conv6(self.relu(self.conv5(self.relu(self.conv4(x)))))
         x = self.silu(x)
 
         for block in self.resBlocks:
@@ -193,7 +196,9 @@ class Unet(nn.Module):
 
         self.encoders = nn.ModuleList([Encoder(*i) for i in [(3,32), (32,64), (64, 128), (128, 256), (256, 512)]])
 
-        self.decoders = nn.ModuleList([Decoder(*i) for i in [(512,256, (21,37)), (256,128,(42,74)), (128, 64,(84,149)), (64, 32,(168,298))]])
+        self.imageDecoders = nn.ModuleList([Decoder(*i) for i in [(512,256, (21,37)), (256,128,(42,74)), (128, 64,(84,149)), (64, 32,(168,298))]])
+
+        self.maskDecoders = nn.ModuleList([Decoder(*i) for i in [(512,256, (21,37)), (256,128,(42,74)), (128, 64,(84,149)), (64, 32,(168,298))]])
 
         self.imgDecoder = nn.Conv2d(32,3,1,1)
         self.tanh = nn.Tanh()
@@ -211,18 +216,24 @@ class Unet(nn.Module):
 
         x = skips[-1]
 
-        for idx, dec in enumerate(self.decoders):
+        for idx, dec in enumerate(self.imageDecoders):
             x = dec(x, skips[3-idx])
 
         image = self.tanh(self.imgDecoder(x))
-        mask = self.maskDecoder(x)
-        return image, self.sigmoid(mask)
 
+        x = skips[-1]
 
-lr = 1e-4
+        for idx, dec in enumerate(self.maskDecoders):
+            x = dec(x, skips[3-idx])
+            
+        mask = self.sigmoid(self.maskDecoder(x))
+        return image, mask
+
+# %%
+lr = 1e-5
 # bce = nn.BCEWithLogitsLoss()
 bce = nn.BCELoss()
-bs = 64
+bs = 48
 
 
 device = "cuda" if torch.cuda.is_available() else "cpu"
@@ -239,26 +250,26 @@ dataset = ImageMaskDataset(image_dir=image_dir, mask_dir=mask_dir, src_dir = src
 dataloader = DataLoader(dataset, batch_size=bs, shuffle=True, num_workers=24)
 
 
-
-log = False
+# %%
 log = True
-log_iter = 10
+log_iter = 20
 img_losses = 0
 mask_losses = 0
 iter = 0
 epochs = 25
+num_imgs = 3
 
 if log:
     config={"epochs": epochs, "batch_size": bs,"lr": lr}
     wandb.init(project='linum', entity='basujindal123', config=config)
 
-
+# %%
 # convert_img_tensor_to_pil_img((masks.bool()*images)[0])
 # convert_img_tensor_to_pil_img((images)[0])
 # # convert_mask_tensor_to_pil_img(masks[0])
 # unet = torch.compile(unet)
 
-
+# %%
 for epoch in range(epochs):
 
     for images, src, masks in tqdm(dataloader):
@@ -276,7 +287,7 @@ for epoch in range(epochs):
         img_pred, mask_pred = unet(images)
 
         img_loss = 2*torch.sum(torch.abs(masks.bool()*(img_pred-src)))/m
-        mask_loss = 100*bce(mask_pred, masks)
+        mask_loss = bce(mask_pred, masks)
         loss = mask_loss + img_loss
 
         loss.backward()
@@ -292,21 +303,25 @@ for epoch in range(epochs):
                     'loss': (mask_losses+img_losses)/log_iter,
                     'mask_loss': mask_losses/log_iter,
                     'img_loss': img_losses/log_iter,
-                    'Corrupted Images': [wandb.Image(i) for i in images[:4].detach()],
-                    'Reconstructed Images' : [wandb.Image(i) for i in img_pred[:4].detach()],
-                    'Src Images' : [wandb.Image(i) for i in src[:4].detach()],
-                    'Masks' : [wandb.Image(i) for i in masks[:4].detach()],
-                    'Predicted Masks' : [wandb.Image(i) for i in (mask_pred[:4]).detach()],
+                    'Corrupted Images': [wandb.Image(i) for i in images[:num_imgs].detach()],
+                    'Reconstructed Images' : [wandb.Image(i) for i in img_pred[:num_imgs].detach()],
+                    'Reconstructed Images' : [wandb.Image(i) for i in img_pred[:num_imgs].detach()],
+                    'Src Images' : [wandb.Image(i) for i in src[:num_imgs].detach()],
+                    'Masks' : [wandb.Image(i) for i in masks[:num_imgs].detach()],
+                    'Predicted Masks' : [wandb.Image(i) for i in (mask_pred[:num_imgs]).detach()],
                     })
 
             # print(epoch, iter, (mask_losses+img_losses)/log_iter, mask_losses/log_iter,img_losses/log_iter)
             mask_losses = 0
             img_losses = 0
 
+# %%
 
 
+# %%
 
 
+# %%
 
 
 
