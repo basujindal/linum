@@ -3,3 +3,4 @@ train/
 wandb
 *.pth
 validation
+output

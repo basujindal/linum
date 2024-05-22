@@ -55,7 +55,7 @@ if __name__ == '__main__':
 
     image_restoration_model = ImageRestorationModel(**kwargs)
     image_restoration_model.load_state_dict(
-        model_checkpoint_state_dict)s
+        model_checkpoint_state_dict)
     image_restoration_model.eval()
     image_restoration_model.to('cuda')
 
